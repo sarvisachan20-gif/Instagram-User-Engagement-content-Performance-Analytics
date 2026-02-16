@@ -1,0 +1,268 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
+import random
+import time
+
+# ---------------------------------------------------
+# PAGE CONFIG
+# ---------------------------------------------------
+st.set_page_config(
+    page_title="Instagram Analytics Pro",
+    page_icon="📊",
+    layout="wide"
+)
+
+# ---------------------------------------------------
+# CUSTOM CSS (Glassmorphism + Instagram Theme)
+# ---------------------------------------------------
+st.markdown("""
+<style>
+body {
+    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+}
+
+[data-testid="stMetric"] {
+    background: rgba(255, 255, 255, 0.08);
+    padding: 20px;
+    border-radius: 15px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.15);
+}
+
+.css-1d391kg {
+    background: linear-gradient(180deg, #833ab4, #fd1d1d, #fcb045);
+}
+
+.block-container {
+    padding-top: 2rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------
+# REAL-TIME MOCK DATA GENERATOR (Simulating IG API)
+# ---------------------------------------------------
+@st.cache_data(ttl=30)
+def generate_mock_data(days=90, posts=300):
+    np.random.seed(42)
+
+    start_date = datetime.today() - timedelta(days=days)
+    dates = [start_date + timedelta(days=i) for i in range(days)]
+
+    content_types = ["Reel", "Image", "Carousel"]
+    hashtags = ["#ai", "#marketing", "#tech", "#startup", "#design", "#growth"]
+
+    data = []
+
+    followers = 10000
+
+    for i in range(posts):
+        date = random.choice(dates)
+        content = random.choice(content_types)
+
+        reach = np.random.randint(1000, 15000)
+        impressions = reach + np.random.randint(500, 5000)
+
+        likes = np.random.randint(100, 2000)
+        saves = np.random.randint(10, 500)
+        comments = np.random.randint(5, 200)
+
+        engagement = likes + saves + comments
+
+        follower_change = np.random.randint(-20, 50)
+        followers += follower_change
+
+        data.append([
+            date,
+            content,
+            random.choice(hashtags),
+            reach,
+            impressions,
+            likes,
+            saves,
+            comments,
+            engagement,
+            follower_change,
+            followers
+        ])
+
+    df = pd.DataFrame(data, columns=[
+        "date", "content_type", "hashtag", "reach", "impressions",
+        "likes", "saves", "comments", "engagement",
+        "follower_change", "total_followers"
+    ])
+
+    df["hour"] = np.random.randint(0, 24, size=len(df))
+    df["day_name"] = df["date"].dt.day_name()
+
+    return df
+
+
+df = generate_mock_data()
+
+# ---------------------------------------------------
+# SIDEBAR FILTERS
+# ---------------------------------------------------
+st.sidebar.title("📸 Instagram Analytics Pro")
+
+date_range = st.sidebar.date_input(
+    "Date Range",
+    [df["date"].min(), df["date"].max()]
+)
+
+content_filter = st.sidebar.multiselect(
+    "Content Type",
+    options=df["content_type"].unique(),
+    default=df["content_type"].unique()
+)
+
+hashtag_filter = st.sidebar.multiselect(
+    "Hashtag",
+    options=df["hashtag"].unique(),
+    default=df["hashtag"].unique()
+)
+
+filtered_df = df[
+    (df["date"] >= pd.to_datetime(date_range[0])) &
+    (df["date"] <= pd.to_datetime(date_range[1])) &
+    (df["content_type"].isin(content_filter)) &
+    (df["hashtag"].isin(hashtag_filter))
+]
+
+# ---------------------------------------------------
+# KPI CALCULATIONS
+# ---------------------------------------------------
+total_reach = filtered_df["reach"].sum()
+total_engagement = filtered_df["engagement"].sum()
+engagement_rate = (total_engagement / total_reach) * 100 if total_reach > 0 else 0
+follower_growth = filtered_df["follower_change"].sum()
+
+# ---------------------------------------------------
+# TABS
+# ---------------------------------------------------
+tab1, tab2, tab3 = st.tabs(["Overview", "Content Performance", "Audience Insights"])
+
+# ===================================================
+# TAB 1 — OVERVIEW
+# ===================================================
+with tab1:
+    st.subheader("Executive Overview")
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Total Reach", f"{total_reach:,}", delta="Live")
+    col2.metric("Engagement Rate", f"{engagement_rate:.2f}%", delta="vs prev")
+    col3.metric("Follower Growth", f"{follower_growth:+}", delta="Net Change")
+
+    daily = filtered_df.groupby("date").agg({
+        "reach": "sum",
+        "impressions": "sum"
+    }).reset_index()
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=daily["date"],
+        y=daily["reach"],
+        name="Reach",
+        line=dict(color="#ff7e5f")
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=daily["date"],
+        y=daily["impressions"],
+        name="Impressions",
+        yaxis="y2",
+        line=dict(color="#2ec4b6")
+    ))
+
+    fig.update_layout(
+        yaxis=dict(title="Reach"),
+        yaxis2=dict(title="Impressions", overlaying="y", side="right"),
+        template="plotly_dark"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+# ===================================================
+# TAB 2 — CONTENT PERFORMANCE
+# ===================================================
+with tab2:
+    st.subheader("Content Intelligence")
+
+    scatter = px.scatter(
+        filtered_df,
+        x="likes",
+        y="saves",
+        color="content_type",
+        size="reach",
+        template="plotly_dark",
+        title="Likes vs Saves (Viral vs Value Content)"
+    )
+    st.plotly_chart(scatter, use_container_width=True)
+
+    top5 = (
+        filtered_df.sort_values("engagement", ascending=False)
+        .head(5)
+    )
+
+    bar = px.bar(
+        top5,
+        x="engagement",
+        y=top5.index.astype(str),
+        orientation="h",
+        template="plotly_dark",
+        title="Top 5 Performing Posts"
+    )
+    st.plotly_chart(bar, use_container_width=True)
+
+# ===================================================
+# TAB 3 — AUDIENCE INSIGHTS
+# ===================================================
+with tab3:
+    st.subheader("Audience & Timing Insights")
+
+    heatmap_data = (
+        filtered_df.groupby(["day_name", "hour"])["engagement"]
+        .mean()
+        .reset_index()
+    )
+
+    pivot = heatmap_data.pivot("day_name", "hour", "engagement")
+
+    heatmap = px.imshow(
+        pivot,
+        template="plotly_dark",
+        title="Best Time to Post Heatmap"
+    )
+    st.plotly_chart(heatmap, use_container_width=True)
+
+    st.markdown("### Strategic Insights")
+
+    # Question 1
+    save_rate = (
+        filtered_df.groupby("content_type")
+        .apply(lambda x: x["saves"].sum() / x["reach"].sum())
+    )
+    best_content = save_rate.idxmax()
+
+    st.write(f"📌 **Highest Save Rate Content Type:** {best_content}")
+
+    # Question 2
+    freq = filtered_df.groupby("date").size()
+    churn = filtered_df.groupby("date")["follower_change"].sum()
+
+    correlation = freq.corr(churn)
+
+    st.write(f"📉 **Correlation between Post Frequency & Follower Churn:** {correlation:.2f}")
+
+    # Question 3
+    top10 = filtered_df.nlargest(int(len(filtered_df)*0.1), "reach")
+    top_hashtags = top10["hashtag"].value_counts().head(3)
+
+    st.write("🔥 **Hashtags consistently in top 10% reach:**")
+    st.write(top_hashtags)
